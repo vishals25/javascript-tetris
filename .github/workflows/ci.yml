@@ -2,7 +2,7 @@ name: CI - Build and Push Tetris Image
 
 on:
   push:
-    branches: [main]
+    branches: [master]
 
 jobs:
   build-and-push:
