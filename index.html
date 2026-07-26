@@ -3,17 +3,84 @@
 <head>
   <title>Javascript Tetris</title>
   <style>
-    body      { font-family: Helvetica, sans-serif; }
-    #tetris   { margin: 1em auto; padding: 1em; border: 4px solid black; border-radius: 10px; background-color: #F8F8F8; }
-    #stats    { display: inline-block; vertical-align: top; }
-    #canvas   { display: inline-block; vertical-align: top; background: url(texture.jpg); box-shadow: 10px 10px 10px #999; border: 2px solid #333; }
-    #menu     { display: inline-block; vertical-align: top; position: relative; }
-    #menu p   { margin: 0.5em 0; text-align: center; }
-    #menu p a { text-decoration: none; color: black; }
-    #upcoming { display: block; margin: 0 auto; background-color: #E0E0E0; }
-    #score    { color: red; font-weight: bold; vertical-align: middle; }
-    #rows     { color: blue; font-weight: bold; vertical-align: middle; }
-    #stats    { position: absolute; bottom: 0em; right: 1em; }
+    /* ---- svg backdrop: soft aurora blobs, no bitmaps ---- */
+    body {
+      font-family: "Avenir Next", Helvetica, sans-serif;
+      margin: 0;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;              /* no page scroll, ever */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #e6edf3;
+      background-color: #0a0d14;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1200' height='900' viewBox='0 0 1200 900'%3E%3Cdefs%3E%3CradialGradient id='a' cx='20%25' cy='15%25' r='55%25'%3E%3Cstop offset='0' stop-color='%236f4bd8' stop-opacity='.55'/%3E%3Cstop offset='1' stop-color='%236f4bd8' stop-opacity='0'/%3E%3C/radialGradient%3E%3CradialGradient id='b' cx='85%25' cy='30%25' r='50%25'%3E%3Cstop offset='0' stop-color='%2300c2c7' stop-opacity='.45'/%3E%3Cstop offset='1' stop-color='%2300c2c7' stop-opacity='0'/%3E%3C/radialGradient%3E%3CradialGradient id='c' cx='55%25' cy='95%25' r='60%25'%3E%3Cstop offset='0' stop-color='%23e0407a' stop-opacity='.4'/%3E%3Cstop offset='1' stop-color='%23e0407a' stop-opacity='0'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect width='1200' height='900' fill='%230a0d14'/%3E%3Crect width='1200' height='900' fill='url(%23a)'/%3E%3Crect width='1200' height='900' fill='url(%23b)'/%3E%3Crect width='1200' height='900' fill='url(%23c)'/%3E%3C/svg%3E");
+      background-size: cover;
+      background-attachment: fixed;
+    }
+
+    /* ---- frosted glass shell ---- */
+    #tetris {
+      flex: none;                    /* keep the sizes the media queries set */
+      margin: 0;
+      padding: 1em;
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 18px;
+      background: rgba(18, 22, 34, 0.55);
+      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(14px);
+      box-shadow: 0 24px 60px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.08);
+    }
+
+    /* ---- playfield: svg grid sized to exactly 10x20 cells ---- */
+    #canvas {
+      display: inline-block; vertical-align: top;
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 8px;
+      background-color: #0c101a;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Cpath d='M20 0H0v20' fill='none' stroke='%23ffffff' stroke-opacity='.07' stroke-width='1'/%3E%3C/svg%3E");
+      background-size: 10% 5%; /* nx = 10 columns, ny = 20 rows */
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5), inset 0 0 40px rgba(0,0,0,0.6);
+    }
+
+    #menu     {
+      display: inline-flex; flex-direction: column; justify-content: center;
+      vertical-align: top; position: relative;
+      overflow: hidden;              /* clip rather than grow the page */
+      box-sizing: border-box; padding-bottom: 1.6em; /* room for the fps counter */
+    }
+    #menu p   { flex: none; margin: 0.45em 0; text-align: center; letter-spacing: 0.04em; color: #9fb0c6; }
+    #menu p a {
+      display: inline-block; padding: 0.45em 0.9em;
+      text-decoration: none; color: #0a0d14; font-weight: 700;
+      background: linear-gradient(135deg, #6ee7f9, #a78bfa);
+      border-radius: 999px;
+      box-shadow: 0 6px 18px rgba(110,231,249,0.35);
+    }
+    #menu p a:hover { filter: brightness(1.1); }
+
+    #upcoming {
+      display: block; margin: 0 auto;
+      border-radius: 8px;
+      background-color: rgba(255,255,255,0.04);
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Cpath d='M20 0H0v20' fill='none' stroke='%23ffffff' stroke-opacity='.06' stroke-width='1'/%3E%3C/svg%3E");
+      background-size: 20% 20%; /* nu = 5 */
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    #title {
+      font-weight: 800; letter-spacing: 0.35em; text-indent: 0.35em;
+      background: linear-gradient(135deg, #6ee7f9, #a78bfa, #ff7a90);
+      -webkit-background-clip: text; background-clip: text;
+      color: transparent;
+    }
+    #keys     { font-size: 0.65em; color: #6b7c93; letter-spacing: 0.02em; }
+    #score    { color: #ff7a90; font-weight: bold; vertical-align: middle; text-shadow: 0 0 12px rgba(255,122,144,0.5); }
+    #rows     { color: #6ee7f9; font-weight: bold; vertical-align: middle; text-shadow: 0 0 12px rgba(110,231,249,0.5); }
+    #stats    { display: inline-block; vertical-align: top; position: absolute; bottom: 0em; right: 1em; opacity: 0.55; }
+    /* the menu column has a fixed height, so drop the extras when it gets tight */
+    @media screen and (max-width: 499px), screen and (max-height: 499px) { #title, #keys { display: none; } }
     @media screen and (min-width:   0px) and (min-height:   0px)  { #tetris { font-size: 0.75em; width: 250px; } #menu { width: 100px; height: 200px; } #upcoming { width:  50px; height:  50px; } #canvas { width: 100px; height: 200px; } } /* 10px chunks */
     @media screen and (min-width: 400px) and (min-height: 400px)  { #tetris { font-size: 1.00em; width: 350px; } #menu { width: 150px; height: 300px; } #upcoming { width:  75px; height:  75px; } #canvas { width: 150px; height: 300px; } } /* 15px chunks */
     @media screen and (min-width: 500px) and (min-height: 500px)  { #tetris { font-size: 1.25em; width: 450px; } #menu { width: 200px; height: 400px; } #upcoming { width: 100px; height: 100px; } #canvas { width: 200px; height: 400px; } } /* 20px chunks */
@@ -28,10 +95,12 @@
 
   <div id="tetris">
     <div id="menu">
-      <p id="start"><a href="javascript:play();">Press Space to Play.</a></p>
+      <p id="title">TETRIS</p>
+      <p id="start"><a href="javascript:play();">Press Space to Play</a></p>
       <p><canvas id="upcoming"></canvas></p>
       <p>score <span id="score">00000</span></p>
       <p>rows <span id="rows">0</span></p>
+      <p id="keys">&larr; &rarr; move &nbsp;&middot;&nbsp; &uarr; rotate &nbsp;&middot;&nbsp; &darr; drop</p>
     </div>
     <canvas id="canvas">
       Sorry, this example cannot be run because your browser does not support the &lt;canvas&gt; element
@@ -112,13 +181,13 @@
     //
     //-------------------------------------------------------------------------
 
-    var i = { size: 4, blocks: [0x0F00, 0x2222, 0x00F0, 0x4444], color: 'cyan'   };
-    var j = { size: 3, blocks: [0x44C0, 0x8E00, 0x6440, 0x0E20], color: 'blue'   };
-    var l = { size: 3, blocks: [0x4460, 0x0E80, 0xC440, 0x2E00], color: 'orange' };
-    var o = { size: 2, blocks: [0xCC00, 0xCC00, 0xCC00, 0xCC00], color: 'yellow' };
-    var s = { size: 3, blocks: [0x06C0, 0x8C40, 0x6C00, 0x4620], color: 'green'  };
-    var t = { size: 3, blocks: [0x0E40, 0x4C40, 0x4E00, 0x4640], color: 'purple' };
-    var z = { size: 3, blocks: [0x0C60, 0x4C80, 0xC600, 0x2640], color: 'red'    };
+    var i = { size: 4, blocks: [0x0F00, 0x2222, 0x00F0, 0x4444], color: '#22d3ee' };
+    var j = { size: 3, blocks: [0x44C0, 0x8E00, 0x6440, 0x0E20], color: '#3b82f6' };
+    var l = { size: 3, blocks: [0x4460, 0x0E80, 0xC440, 0x2E00], color: '#f59e0b' };
+    var o = { size: 2, blocks: [0xCC00, 0xCC00, 0xCC00, 0xCC00], color: '#facc15' };
+    var s = { size: 3, blocks: [0x06C0, 0x8C40, 0x6C00, 0x4620], color: '#22c55e' };
+    var t = { size: 3, blocks: [0x0E40, 0x4C40, 0x4E00, 0x4640], color: '#a855f7' };
+    var z = { size: 3, blocks: [0x0C60, 0x4C80, 0xC600, 0x2640], color: '#ef4444' };
 
     //------------------------------------------------
     // do the bit manipulation and iterate through each
@@ -392,6 +461,7 @@
               drawBlock(ctx, x, y, block.color);
           }
         }
+        ctx.strokeStyle = 'rgba(255,255,255,0.18)';
         ctx.strokeRect(0, 0, nx*dx - 1, ny*dy - 1); // court boundary
         invalid.court = false;
       }
@@ -404,8 +474,6 @@
         uctx.translate(0.5, 0.5);
         uctx.clearRect(0, 0, nu*dx, nu*dy);
         drawPiece(uctx, next.type, padding, padding, next.dir);
-        uctx.strokeStyle = 'black';
-        uctx.strokeRect(0, 0, nu*dx - 1, nu*dy - 1);
         uctx.restore();
         invalid.next = false;
       }
@@ -431,10 +499,59 @@
       });
     }
 
+    //------------------------------------------------
+    // mix a '#rrggbb' color towards white (amt > 0) or
+    // towards black (amt < 0), amt in [-1, 1]
+    //------------------------------------------------
+    function shade(color, amt) {
+      var n = parseInt(color.slice(1), 16),
+          t = amt < 0 ? 0 : 255,
+          p = Math.abs(amt),
+          r = (n >> 16) & 0xFF, g = (n >> 8) & 0xFF, b = n & 0xFF;
+      return 'rgb(' + Math.round(r + (t-r)*p) + ',' +
+                      Math.round(g + (t-g)*p) + ',' +
+                      Math.round(b + (t-b)*p) + ')';
+    }
+
+    function roundRect(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x+r, y);
+      ctx.arcTo(x+w, y,   x+w, y+h, r);
+      ctx.arcTo(x+w, y+h, x,   y+h, r);
+      ctx.arcTo(x,   y+h, x,   y,   r);
+      ctx.arcTo(x,   y,   x+w, y,   r);
+      ctx.closePath();
+    }
+
     function drawBlock(ctx, x, y, color) {
-      ctx.fillStyle = color;
-      ctx.fillRect(x*dx, y*dy, dx, dy);
-      ctx.strokeRect(x*dx, y*dy, dx, dy)
+      var min  = Math.min(dx, dy),
+          pad  = Math.max(0.5, min * 0.06),
+          rad  = Math.max(1.5, min * 0.18),
+          px   = x*dx + pad, py = y*dy + pad,
+          w    = dx - pad*2, h = dy - pad*2;
+
+      var grad = ctx.createLinearGradient(px, py, px, py + h);
+      grad.addColorStop(0,   shade(color,  0.35));
+      grad.addColorStop(0.5, color);
+      grad.addColorStop(1,   shade(color, -0.30));
+
+      ctx.save();
+      ctx.shadowColor = color;
+      ctx.shadowBlur  = min * 0.35;
+      ctx.fillStyle   = grad;
+      roundRect(ctx, px, py, w, h, rad);
+      ctx.fill();
+      ctx.restore();
+
+      // glossy top edge + crisp outline
+      ctx.fillStyle = 'rgba(255,255,255,0.28)';
+      roundRect(ctx, px + w*0.14, py + h*0.10, w*0.72, h*0.22, rad*0.5);
+      ctx.fill();
+
+      ctx.strokeStyle = shade(color, -0.55);
+      ctx.lineWidth   = 1;
+      roundRect(ctx, px, py, w, h, rad);
+      ctx.stroke();
     }
 
     //-------------------------------------------------------------------------
