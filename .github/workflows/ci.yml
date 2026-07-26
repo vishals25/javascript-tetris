@@ -4,6 +4,9 @@ on:
   push:
     branches: [master]
 
+permissions:
+  contents: write
+
 jobs:
   build-and-tag:
     runs-on: ubuntu-latest
@@ -12,6 +15,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0   # required — full tag history needed for version calculation
+          # PAT, not GITHUB_TOKEN — tags pushed with GITHUB_TOKEN do not trigger release.yml
+          token: ${{ secrets.RELEASE_PAT }}
 
       - name: Bump version
         id: version
