@@ -44,6 +44,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      #Included to support multi-arch builds on non-x86 runners 
+      #(e.g. Apple Silicon)
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -59,6 +63,10 @@ jobs:
         with:
           context: .
           push: true
+          # This is will push the same image to multiple platforms 
+          #(e.g. linux/amd64 and linux/arm64) and 
+          #tag it with the GitHub release tag, the commit SHA, and "latest"
+          platforms: linux/amd64,linux/arm64
           tags: |
             svishal25/tetris:${{ github.ref_name }}
             svishal25/tetris:${{ github.sha }}
