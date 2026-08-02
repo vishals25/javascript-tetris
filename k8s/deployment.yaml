@@ -23,7 +23,7 @@ spec:
         - name: tetris
           # Pinned by tag; bump this (or use the immutable :<sha> tag) on release
           image: svishal25/tetris:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8080

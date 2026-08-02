@@ -10,4 +10,4 @@ resources:
 
 images:
   - name: svishal25/tetris
-    newTag: local
+    newTag: latest
