@@ -1,0 +1,336 @@
+===============================================================================
+ TETRIS ON KUBERNETES - COMMAND RUNBOOK
+ Run everything from the javascript-tetris/ directory.
+===============================================================================
+
+
+-------------------------------------------------------------------------------
+ A. ONE-TIME INSTALLS
+-------------------------------------------------------------------------------
+
+# Kubernetes CLI and the local cluster tool
+brew install kubectl kind
+
+# Assigns real external IPs to type:LoadBalancer services in kind (optional)
+brew install cloud-provider-kind
+
+# Public HTTPS tunnel to a locally running app (optional)
+brew install cloudflared
+
+
+-------------------------------------------------------------------------------
+ B. LOCAL CLUSTER (kind)
+-------------------------------------------------------------------------------
+
+# List existing clusters - kind refuses to create over one that already exists
+kind get clusters
+
+# Create the cluster - takes ~60s, writes context kind-tetris to ~/.kube/config
+kind create cluster --name tetris
+
+# Confirm the API server responds
+kubectl cluster-info
+
+# Wait until the node finishes installing its CNI and reports Ready
+kubectl wait --for=condition=Ready node --all --timeout=180s
+
+# Deploy namespace + deployment + service in one shot
+kubectl apply -k k8s/
+
+# Block until both replicas are up
+kubectl -n tetris rollout status deploy/tetris
+
+# Stop typing -n tetris on every command
+kubectl config set-context --current --namespace=tetris
+
+
+-------------------------------------------------------------------------------
+ C. REACH THE APP FROM YOUR MAC
+-------------------------------------------------------------------------------
+
+--- Option 1: port-forward (no sudo, but hits ONE pod - no load balancing) ---
+
+# Forward local 8080 to the Service's port 80, then open http://localhost:8080
+kubectl -n tetris port-forward svc/tetris 8080:80
+
+--- Option 2: cloud-provider-kind (real LoadBalancer, needs sudo for port 80) ---
+
+# Run in its OWN terminal and leave it running - assigns the external IP
+sudo cloud-provider-kind --enable-lb-port-mapping
+
+# Watch EXTERNAL-IP go from <pending> to 172.18.x.x
+kubectl -n tetris get svc tetris -w
+
+# Verify - note port 80, so no port number in the browser: http://localhost
+curl -I http://localhost
+
+# Find your LAN IP - other devices on the same wifi can reach this
+ipconfig getifaddr en0
+
+--- Option 3: public HTTPS URL via Cloudflare (needs option 1 or 2 running) ---
+
+# Prints a public https://<random>.trycloudflare.com URL, no account needed
+cloudflared tunnel --url http://localhost
+
+
+-------------------------------------------------------------------------------
+ D. CLOUD CLUSTER (Civo)  <-- this section alone makes the app public
+-------------------------------------------------------------------------------
+
+--- D0. Browser prerequisites - not commands, but required first ---
+
+#   1. Sign up at civo.com and add a card to claim the $250 credit.
+#      New accounts go through a manual review; wait for the activation email.
+#   2. Dashboard -> Kubernetes -> Create cluster.
+#      Name: tetris | Nodes: 1 | smallest size | region closest to you.
+#      Ready in ~90 seconds.
+#   3. On the cluster page, click Download Config. This repo's copy lives at
+#      javascript-tetris/civo-tetris-docker-k8s-kubeconfig and its context is
+#      named tetris-docker-k8s (same as the cluster name in the dashboard).
+#      It holds a cluster admin token - .gitignore keeps it out of git.
+
+--- D1. Commands ---
+
+--- Option A: use the file directly, nothing touches ~/.kube/config ---
+
+# Scope one shell to the Civo cluster - every kubectl below inherits it
+export KUBECONFIG=$PWD/civo-tetris-docker-k8s-kubeconfig
+
+# Confirm it points at Civo and not kind
+kubectl config current-context
+
+--- Option B: merge it in permanently so you can switch contexts ---
+
+# Fold the Civo kubeconfig into your existing one - back up first, this rewrites it
+cp ~/.kube/config ~/.kube/config.bak
+KUBECONFIG=~/.kube/config:$PWD/civo-tetris-docker-k8s-kubeconfig kubectl config view --flatten > /tmp/merged && mv /tmp/merged ~/.kube/config
+
+# List every cluster you can talk to - expect kind-tetris and tetris-docker-k8s
+kubectl config get-contexts
+
+# Point kubectl at the Civo cluster
+kubectl config use-context tetris-docker-k8s
+
+# Switch back to the local kind cluster when you are done
+kubectl config use-context kind-tetris
+
+--- D2. Deploy (either option above works) ---
+
+# Same manifests, no changes needed - Civo nodes are amd64, image is multi-arch
+kubectl apply -k k8s/
+
+# Wait for the cloud to provision a real public load balancer
+kubectl -n tetris get svc tetris -w
+
+# Grab just the public IP
+kubectl -n tetris get svc tetris -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+
+
+-------------------------------------------------------------------------------
+ E. VERIFY
+-------------------------------------------------------------------------------
+
+# Both pods should read 1/1 Running
+kubectl -n tetris get pods -o wide
+
+# Confirm which image tag is actually deployed
+kubectl -n tetris get deploy tetris -o jsonpath='{.spec.template.spec.containers[0].image}'
+
+# The Service should list two endpoint IPs - proof it load balances
+kubectl -n tetris get endpointslices -l kubernetes.io/service-name=tetris -o wide
+
+# Hit the Service from inside the cluster - expect four 200s
+kubectl -n tetris run curltest --rm -it --restart=Never --image=curlimages/curl --command -- sh -c 'for i in 1 2 3 4; do curl -s -o /dev/null -w "%{http_code}\n" http://tetris/; done'
+
+
+-------------------------------------------------------------------------------
+ F. TROUBLESHOOT
+-------------------------------------------------------------------------------
+
+# Why is a pod not starting - look at the Events section at the bottom
+kubectl -n tetris describe pod -l app=tetris
+
+# Application logs from both replicas
+kubectl -n tetris logs -l app=tetris --tail=50
+
+# Cluster events in time order - image pull failures show up here
+kubectl -n tetris get events --sort-by=.lastTimestamp
+
+# Which images the kind node has cached locally
+docker exec tetris-control-plane crictl images | grep tetris
+
+# Check what platforms the published image supports
+docker buildx imagetools inspect svishal25/tetris:latest
+
+# Preview the final rendered YAML without applying it
+kubectl kustomize k8s/
+
+
+-------------------------------------------------------------------------------
+ G. CONTINUOUS DELIVERY (Argo CD / GitOps)
+-------------------------------------------------------------------------------
+
+--- G0. How the whole loop fits together ---
+
+#   git push to master
+#     -> ci.yml            calculates semver, pushes tag v1.2.3
+#     -> release.yml build  Trivy scans config + image, fails closed
+#     -> release.yml push   multi-arch image to Docker Hub
+#     -> release.yml bump-manifest
+#                           writes "newTag: v1.2.3" into k8s/kustomization.yaml
+#                           and commits it back to master
+#     -> Argo CD            sees the git diff, syncs, rolls the Deployment
+#
+#   Nothing in GitHub holds a cluster credential. The cluster reaches OUT.
+
+--- G1. Install Argo CD (one time) ---
+
+# Installed here via the Civo marketplace (dashboard -> cluster -> Marketplace),
+# which deploys the full 7-component stack into namespace argocd.
+#
+# SIZE THE NODES FIRST. That stack needs ~1.5-2Gi and will NOT fit on
+# g4s.kube.xsmall, whose 940Mi capacity leaves only 499Mi allocatable after
+# k3s overhead. On xsmall it evicts in a loop - 255 dead pods in 45 minutes,
+# with argocd-server (the UI) never once reaching Ready. Use medium (4Gi).
+
+# The manual alternative, if not using the marketplace
+kubectl create namespace argocd
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+# Wait for it - the CRDs must exist before the Application below applies
+kubectl -n argocd wait --for=condition=available deploy --all --timeout=300s
+
+# Sanity check after any resize - expect 7 Running and nothing Evicted
+kubectl -n argocd get pods --no-headers | awk '{print $3}' | sort | uniq -c
+
+# Clear evicted corpses after fixing a memory problem - they are dead objects,
+# safe to bulk delete, and they clutter every subsequent get
+kubectl -n argocd delete pods --field-selector status.phase=Failed
+
+--- G2. Register this repo (one time, the only kubectl the app ever needs) ---
+
+# From here on Argo CD applies k8s/ itself - never kubectl apply -k again
+kubectl apply -f k8s/argocd/application.yaml
+
+# Watch it reach Synced / Healthy
+kubectl -n argocd get application tetris -w
+
+--- G3. Reach the Argo CD UI ---
+
+# Initial admin password - username is "admin"
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
+
+# Port-forward the UI, then open https://localhost:8081 (self-signed cert warning)
+kubectl -n argocd port-forward svc/argocd-server 8081:443
+
+--- G4. Ship a release ---
+
+# That is the whole deploy. Everything below is observation, not action.
+git commit -m "Minor: faster drop speed" && git push origin master
+
+# Follow the sync
+kubectl -n argocd get application tetris -w
+
+# Confirm which image actually landed
+kubectl -n tetris get deploy tetris -o jsonpath='{.spec.template.spec.containers[0].image}'
+
+--- G5. Roll back ---
+
+# Rollback is a git operation now. Revert the deploy commit and push;
+# Argo CD syncs the cluster back. kubectl rollout undo would be reverted
+# by selfHeal within seconds.
+git revert <sha-of-"chore: deploy v1.2.3"> && git push origin master
+
+# Or pin the manifest by hand and let CI leave it alone
+sed -i '' 's|newTag: .*|newTag: v1.1.0|' k8s/kustomization.yaml && git commit -am "Rollback to v1.1.0" && git push
+
+--- G6. Force a sync without waiting for the 3-minute poll ---
+
+kubectl -n argocd patch application tetris --type merge -p '{"operation":{"sync":{}}}'
+
+
+-------------------------------------------------------------------------------
+ H. TEARDOWN
+-------------------------------------------------------------------------------
+
+# Remove the app but keep the cluster
+kubectl delete -k k8s/
+
+# Delete the local cluster and its Docker container
+kind delete cluster --name tetris
+
+# Stop the load balancer helper if it is still running as root
+sudo pkill cloud-provider-kind
+
+# Delete the Civo cluster from the dashboard, or with the CLI, to stop billing
+civo kubernetes remove tetris-docker-k8s
+
+
+===============================================================================
+ GOTCHAS LEARNED THE HARD WAY
+===============================================================================
+
+# kind nodes are Docker containers, so a NodePort is NOT reachable from macOS
+#   unless the cluster was created with extraPortMappings.
+
+# The LoadBalancer IP from cloud-provider-kind is 172.18.x.x - private Docker
+#   space. Reachable from your Mac and your LAN, never from the internet.
+
+# port-forward tunnels through the API server to a SINGLE pod. It bypasses
+#   kube-proxy entirely, so it cannot be used to test load balancing.
+
+# imagePullPolicy takes Always | IfNotPresent | Never - it is not a boolean.
+#   IfNotPresent will happily run a stale locally-cached image that differs
+#   from the registry image of the same tag, and nothing warns you.
+
+# Two different 8080s exist: the local port you pick for port-forward, and the
+#   container port. Both avoid privileged ports, but they are set separately.
+
+# A Civo kubeconfig is a credential, not config. It carries a cluster-admin
+#   token with no expiry, so committing it hands anyone who reads the repo full
+#   control of the cluster. If it ever lands in a commit, rotating means
+#   deleting the cluster - the token cannot be revoked on its own.
+
+# export KUBECONFIG only lives in the shell you ran it in. A second terminal
+#   still points at kind, so an apply there silently hits the wrong cluster.
+#   kubectl config current-context is the one-second check worth making.
+
+# newTag: latest breaks GitOps. Argo CD syncs on git diffs, and :latest never
+#   changes the manifest, so a new release deploys nothing. Use version tags.
+
+# The bump-manifest job MUST push with the default GITHUB_TOKEN, never with
+#   secrets.RELEASE_PAT. Pushes made with GITHUB_TOKEN do not trigger workflows.
+#   With the PAT the repo tag-loops forever: push -> tag -> release -> push.
+#   This is the exact opposite of ci.yml, which needs the PAT for the same
+#   reason inverted - it WANTS its tag push to trigger release.yml.
+
+# selfHeal makes kubectl a debugging tool, not a deployment tool. kubectl set
+#   image, scale, or edit all get reverted within seconds. Change git instead.
+#   To experiment by hand, pause it first:
+#     kubectl -n argocd patch application tetris --type merge \
+#       -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":false}}}}'
+
+# prune: true deletes anything that leaves the repo. Deleting a manifest file
+#   is now a production delete, not a cleanup.
+
+# Argo CD polls git every 3 minutes by default, so a deploy is not instant.
+#   A webhook makes it immediate; the poll is fine for learning.
+
+# Civo node RAM is roughly half usable. g4s.kube.xsmall reports 940Mi capacity
+#   but only 499Mi allocatable - k3s, kubelet and system reserves eat the rest.
+#   Always size against ALLOCATABLE, never capacity:
+#     kubectl get nodes -o custom-columns='N:.metadata.name,A:.status.allocatable.memory'
+
+# MemoryPressure evicts pods faster than Deployments can replace them, so the
+#   symptom is hundreds of Evicted pods, not a clean OOMKill. Check the node
+#   condition before debugging the workload:
+#     kubectl describe nodes | grep -E "^Name:|MemoryPressure"
+
+# Resizing a Civo node pool replaces the nodes outright - new names, new IPs,
+#   everything reschedules. Pods spread across the fresh nodes, which happened
+#   to fix the both-replicas-on-one-node problem here by accident, not design.
+#   Use topologySpreadConstraints if you actually want that guaranteed.
+
+# An Application applied over resources you already created by hand shows
+#   OutOfSync while Healthy. Nothing is broken - Argo CD is only missing its
+#   argocd.argoproj.io/instance tracking label. The first sync adopts them.
