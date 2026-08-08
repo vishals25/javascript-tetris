@@ -4,3 +4,10 @@ README.md
 LICENSE
 Dockerfile
 .dockerignore
+.gitignore
+
+# COPY . serves the whole context over nginx - keep credentials and
+# manifests out of the published image
+*kubeconfig
+*.kubeconfig
+k8s

@@ -1,0 +1,7 @@
+# Civo/kubernetes credentials - these carry cluster-admin tokens
+*kubeconfig
+*.kubeconfig
+kubeconfig*
+.kube/
+
+.DS_Store
