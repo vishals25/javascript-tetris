@@ -334,3 +334,8 @@ License
 =======
 
 [MIT](http://en.wikipedia.org/wiki/MIT_License) license.
+
+
+<img width="1211" height="783" alt="Screenshot 2026-08-08 at 10 13 53 PM" src="https://github.com/user-attachments/assets/5473151d-ce2a-4a9c-9776-ea0b9f628d2f" />
+<img width="1439" height="833" alt="Screenshot 2026-08-08 at 10 18 02 PM" src="https://github.com/user-attachments/assets/0c9c66fc-68ea-4341-bb98-d817e706d16d" />
+
