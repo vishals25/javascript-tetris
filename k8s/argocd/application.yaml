@@ -1,0 +1,49 @@
+# Registers this repo with Argo CD. Applied ONCE by hand to bootstrap; after
+# that Argo CD watches git and applies k8s/ itself, so nothing else is ever
+# deployed with kubectl.
+#
+# Deliberately NOT listed in k8s/kustomization.yaml - the Application is what
+# manages the app, so it must not be managed by the app it manages.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tetris
+  # Must be argocd - Argo CD only reconciles Applications in its own namespace
+  namespace: argocd
+spec:
+  # "default" is the built-in AppProject; it permits any repo and any cluster
+  project: default
+
+  source:
+    # HTTPS, not the git@github-personal: SSH alias from your local remote -
+    # that alias only exists in your ~/.ssh/config. The repo is public, so
+    # Argo CD needs no credentials to read it.
+    repoURL: https://github.com/vishals25/javascript-tetris.git
+    targetRevision: master
+    path: k8s
+    # No explicit plugin config needed - Argo CD sees kustomization.yaml and
+    # runs kustomize build on its own
+
+  destination:
+    # The cluster Argo CD itself runs in, addressed from inside the cluster
+    server: https://kubernetes.default.svc
+    namespace: tetris
+
+  syncPolicy:
+    automated:
+      # Delete resources that disappear from git. Without this, removing a
+      # manifest from the repo leaves it running in the cluster forever.
+      prune: true
+      # Revert manual kubectl edits back to what git says. This is what makes
+      # git the source of truth rather than a suggestion.
+      selfHeal: true
+    syncOptions:
+      # namespace.yaml already creates it, but this keeps the very first sync
+      # from racing itself
+      - CreateNamespace=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        maxDuration: 3m
+        factor: 2

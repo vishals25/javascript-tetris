@@ -71,3 +71,47 @@ jobs:
             svishal25/tetris:${{ github.ref_name }}
             svishal25/tetris:${{ github.sha }}
             svishal25/tetris:latest
+
+  # The CD trigger. Argo CD watches master and syncs on git diffs, so shipping a
+  # release means changing a tracked file - pushing the image alone deploys
+  # nothing. This job writes the released tag into k8s/kustomization.yaml; Argo
+  # CD sees that commit and rolls the cluster forward on its own.
+  bump-manifest:
+    needs: push                # only pin a tag whose image actually exists
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout master
+        uses: actions/checkout@v4
+        with:
+          # This workflow is triggered by a tag, so the default checkout is a
+          # detached HEAD. The commit has to land on the branch Argo CD tracks.
+          ref: master
+          # Deliberately the default GITHUB_TOKEN, NOT secrets.RELEASE_PAT.
+          # Pushes made with GITHUB_TOKEN do not trigger workflows, which is what
+          # breaks the loop this job would otherwise create:
+          #   push to master -> ci.yml tags -> release.yml -> push to master -> ...
+          # Swapping in the PAT here would tag-loop the repo forever.
+
+      - name: Pin kustomization to the released tag
+        run: |
+          sed -i "s|^\( *newTag: \).*|\1${GITHUB_REF_NAME}|" k8s/kustomization.yaml
+          git diff --stat
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # No-op guard: re-running this workflow on an existing tag would
+          # otherwise fail on an empty commit
+          if git diff --quiet -- k8s/kustomization.yaml; then
+            echo "kustomization.yaml already pinned to ${GITHUB_REF_NAME} - nothing to do"
+            exit 0
+          fi
+          git add k8s/kustomization.yaml
+          # [skip ci] is belt and braces alongside the GITHUB_TOKEN behaviour above
+          git commit -m "chore: deploy ${GITHUB_REF_NAME} [skip ci]"
+          # Someone may have merged while the image was building
+          git pull --rebase origin master
+          git push origin master

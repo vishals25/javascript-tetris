@@ -21,9 +21,13 @@ spec:
           type: RuntimeDefault
       containers:
         - name: tetris
-          # Pinned by tag; bump this (or use the immutable :<sha> tag) on release
+          # The tag here is a placeholder - kustomization.yaml's images: block
+          # rewrites it to the released version, and CI rewrites that.
           image: svishal25/tetris:latest
-          imagePullPolicy: Always
+          # IfNotPresent is correct now that tags are immutable versions: a
+          # cached v1.1.0 is by definition the same image as the registry's.
+          # This was Always only to work around :latest going stale.
+          imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8080
