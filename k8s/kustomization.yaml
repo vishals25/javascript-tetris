@@ -13,4 +13,4 @@ images:
     # Written by the bump-manifest job in .github/workflows/release.yml on every
     # release. This line IS the deploy trigger: Argo CD syncs on git diffs, so
     # :latest would mean the manifest never changes and no release ever ships.
-    newTag: v2.1.0
+    newTag: v2.1.1
